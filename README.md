@@ -47,7 +47,7 @@ auth-security-research/
 │   ├── vulnerable_password_session.py
 │   ├── attacks/
 │   ├── hardened_password_session.py
-│   └── report.md
+│   └── report.pdf
 ├── system-2-totp-mfa/
 ├── system-3-passkeys-webauthn/
 ├── system-4-oauth-oidc/
