@@ -312,6 +312,10 @@ and RFC 9700 (OAuth 2.0 Security BCP), OpenID Connect Core 1.0, RFC 7515/7518/75
 and RFC 8725 (JWT/JWS and best practices), RFC 9449 (DPoP), NIST SP 800-63B,
 OWASP ASVS v4 sections 2 and 2.5, and the CWE entries cited inline in each attack.
 
+## License
+
+MIT. See `LICENSE`.
+
 ## Safety
 
 Everything here is a teaching lab. Every server binds to localhost, every attack is
