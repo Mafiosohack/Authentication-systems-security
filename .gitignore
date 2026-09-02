@@ -1,0 +1,27 @@
+# virtual environments
+.venv/
+venv/
+env/
+
+# python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# runtime databases (every app recreates its own on start)
+*.db
+*.sqlite
+*.sqlite3
+
+# local tool settings
+.claude/
+.vscode/
+.idea/
+
+# node (System 4 report builder)
+node_modules/
+package-lock.json
+
+# OS noise
+.DS_Store
+Thumbs.db

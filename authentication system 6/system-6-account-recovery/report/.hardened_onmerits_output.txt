@@ -1,0 +1,33 @@
+
+==================================================================
+HAPPY PATH - legitimate recovery still works end-to-end
+==================================================================
+delivered token (from Alice's own mailbox): 9HRJq0wTYAPk...
+delivered otp: 944460
+reset via link token -> 200 {'status': 'password reset', 'account': 'alice@corp.example'}
+login with new password -> {'status': 'ok', 'username': 'alice', 'is_admin': False}
+
+==================================================================
+#6 ON MERITS - single-use + invalidation (attacker HOLDS a real token)
+==================================================================
+attacker holds a valid victim token: jalNCoxj-p3n...
+use #1 (legitimate) -> 200 {'status': 'password reset', 'account': 'victim@corp.example'}
+use #2 REPLAY same token -> 400 {'error': 'invalid or expired token'}
+login with replayed pw ? -> False (False = replay blocked)
+older sibling token after a completed reset -> 400 {'error': 'invalid or expired token'} (400 = all tokens invalidated)
+
+==================================================================
+#8 ON MERITS - binding: attacker's OWN valid token cannot touch root
+==================================================================
+attacker's OWN legitimate token: 1IrK6mEHb3Xl...
+reset attempt with 'email':'root@corp.example' -> 200 {'status': 'password reset', 'account': 'mallory@evil.example'}
+  -> note 'account' in the response is the TOKEN's owner, not root
+login root with 'pwned' ? -> False (False = root untouched)
+login root with original admin pw ? -> True (True = still intact)
+login mallory with 'pwned' (her OWN reset applied) ? -> True (True = only her account changed)
+
+------------------------------------------------------------------
+[+] DEFENDER RESULT - even handed real tokens, the attacker cannot
+    replay them, cannot outlive invalidation, and cannot redirect a
+    reset to another account. Legit recovery still works.
+------------------------------------------------------------------
